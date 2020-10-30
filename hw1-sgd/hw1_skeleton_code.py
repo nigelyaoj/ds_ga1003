@@ -3,8 +3,7 @@ import logging
 import numpy as np
 import sys
 import matplotlib.pyplot as plt
-from sklearn.cross_validation import train_test_split
-
+from sklearn.model_selection import train_test_split
 ### Assignment Owner: Tian Wang
 
 #######################################
@@ -25,7 +24,12 @@ def feature_normalization(train, test):
 
     """
     # TODO
+    a = np.max(train, axis=0) 
+    b = np.min(train, axis=0)
+    train = (train - b) / (a - b)
+    test = (test - b) / (a - b)
 
+    return train, test
 
 ########################################
 ####Q2.2a: The square loss function
@@ -44,7 +48,8 @@ def compute_square_loss(X, y, theta):
     """
     loss = 0 #initialize the square_loss
     #TODO
-    
+    loss = np.mean((y - X.dot(theta))**2) / 2
+    return loss 
 
 
 ########################################
@@ -62,7 +67,7 @@ def compute_square_loss_gradient(X, y, theta):
         grad - gradient vector, 1D numpy array of size (num_features)
     """
     #TODO
-    
+    return -X.T.dot(y - X.dot(theta)) / X.shape[0]
        
         
 ###########################################
@@ -105,7 +110,16 @@ def grad_checker(X, y, theta, epsilon=0.01, tolerance=1e-4):
     true_gradient = compute_square_loss_gradient(X, y, theta) #the true gradient
     num_features = theta.shape[0]
     approx_grad = np.zeros(num_features) #Initialize the gradient we approximate
+
     #TODO
+
+    for idx in range(num_features):
+        delta = np.zeros(num_features) 
+        delta[idx] = epsilon
+        approx_grad[idx] = (compute_square_loss(X,y,theta+delta) - compute_square_loss(X,y,theta-delta)) / (2*epsilon)
+    error = np.sqrt(np.sum((approx_grad - true_gradient) ** 2))
+    return True if error < tolerance else False
+
     
 #################################################
 ###Q2.3b: Generic Gradient Checker
@@ -115,12 +129,23 @@ def generic_gradient_checker(X, y, theta, objective_func, gradient_func, epsilon
     the true gradient for objective_func(X, y, theta).
     Eg: In LSR, the objective_func = compute_square_loss, and gradient_func = compute_square_loss_gradient
     """
+
     #TODO
+    n = theta.shape[0]
+    true_grad = gradient_func(X,y,theta)
+    approx_grad = np.zeros(n)
+    for idx in range(n):
+        delta = np.zeros(n)
+        delta[idx] = epsilon
+        approx_grad[idx] = (objective_func(X,y,theta+delta) - objective_func(X, y, theta-delta)) / (2*epsilon)
+    error = np.sqrt(np.sum((approx_grad - true_grad) ** 2))
+
+    return True if error < tolerance else False
 
 
 ####################################
 ####Q2.4a: Batch Gradient Descent
-def batch_grad_descent(X, y, alpha=0.1, num_iter=1000, check_gradient=False):
+def batch_grad_descent(X, y, alpha=0.1, num_iter=1000, check_gradient=False, backtracking_line_search=False):
     """
     In this question you will implement batch gradient descent to
     minimize the square loss objective
@@ -141,14 +166,32 @@ def batch_grad_descent(X, y, alpha=0.1, num_iter=1000, check_gradient=False):
     theta_hist = np.zeros((num_iter+1, num_features))  #Initialize theta_hist
     loss_hist = np.zeros(num_iter+1) #initialize loss_hist
     theta = np.ones(num_features) #initialize theta
+
     #TODO
+    theta_hist[0] = theta.copy()
+    loss_hist[0] = compute_square_loss(X, y, theta.copy())
+    for i in range(num_iter):
+        grad = compute_square_loss_gradient(X, y, theta.copy())
+        if backtracking_line_search:
+            alpha = search_better_alpha(X, y, theta, -grad, compute_square_loss, grad)
+        theta -= alpha * grad
+        theta_hist[i+1] = theta.copy()
+        loss_hist[i+1] = compute_square_loss(X, y, theta.copy())
+
+    return theta_hist, loss_hist
 
 ####################################
 ###Q2.4b: Implement backtracking line search in batch_gradient_descent
 ###Check http://en.wikipedia.org/wiki/Backtracking_line_search for details
 #TODO
     
-
+def search_better_alpha(x, y, theta, p, f, grad, alpha=0.1, c=0.9, tao=0.7):
+    # Attention: the parameter should be a decease direction!
+    m = p.dot(grad)
+    t = -c*m
+    while f(x, y, theta) - f(x, y, theta+alpha*p) >= alpha * t:
+        alpha *= tao
+    return alpha
 
 ###################################################
 ###Q2.5a: Compute the gradient of Regularized Batch Gradient Descent
@@ -166,6 +209,9 @@ def compute_regularized_square_loss_gradient(X, y, theta, lambda_reg):
         grad - gradient vector, 1D numpy array of size (num_features)
     """
     #TODO
+    m = X.shape[0]
+    grad = 1/m * X.T.dot(X.dot(theta) - y)  + 2 * lambda_reg * theta
+    return grad
 
 ###################################################
 ###Q2.5b: Batch Gradient Descent with regularization term
@@ -187,6 +233,16 @@ def regularized_grad_descent(X, y, alpha=0.1, lambda_reg=1, num_iter=1000):
     theta_hist = np.zeros((num_iter+1, num_features))  #Initialize theta_hist
     loss_hist = np.zeros(num_iter+1) #Initialize loss_hist
     #TODO
+    m = X.shape[0]
+    theta_hist[0] = theta.copy()
+    loss_hist[0] = 1/2/m * np.sum((X.dot(theta) - y) ** 2) + lambda_reg * np.sum(theta ** 2)
+    for i in range(num_iter):
+        grad = compute_regularized_square_loss_gradient(X, y, theta, lambda_reg)
+        theta = theta - alpha * grad
+        theta_hist[i+1] = theta.copy()
+        loss_hist[i+1] = 1/2/m * np.sum((X.dot(theta) - y) ** 2) + lambda_reg * np.sum(theta ** 2)
+    return theta_hist, loss_hist
+        
     
 #############################################
 ##Q2.5c: Visualization of Regularized Batch Gradient Descent
@@ -243,8 +299,9 @@ def main():
     X_train, X_test = feature_normalization(X_train, X_test)
     X_train = np.hstack((X_train, np.ones((X_train.shape[0], 1))))  # Add bias term
     X_test = np.hstack((X_test, np.ones((X_test.shape[0], 1)))) # Add bias term
-
+    
     # TODO
 
+    return X_train, y_train, X_test, y_test
 if __name__ == "__main__":
     main()
